@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pacman Expectimax</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #000;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(11, 35px);
+            grid-template-rows: repeat(11, 35px);
+            gap: 1px;
+            background: #333;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        
+        .cell {
+            width: 35px;
+            height: 35px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 3px;
+        }
+        
+        .wall {
+            background: #0066cc;
+        }
+        
+        .empty {
+            background: #000;
+        }
+        
+        .dot {
+            background: #000;
+            position: relative;
+        }
+        
+        .dot::after {
+            content: '•';
+            color: #ffff00;
+            font-size: 12px;
+        }
+        
+        .pacman {
+            background: #000;
+            color: #ffff00;
+        }
+        
+        .ghost {
+            background: #000;
+            color: #ff6b6b;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #0052a3;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .info {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .score {
+            font-size: 24px;
+            margin: 10px 0;
+        }
+        
+        .thinking {
+            color: #ffff00;
+            margin: 10px 0;
+        }
+        
+        .algorithm-info {
+            background: #222;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-width: 600px;
+            text-align: left;
+        }
+        
+        .probability-controls {
+            background: #333;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+        }
+        
+        .slider-container {
+            margin: 10px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        input[type="range"] {
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>Pacman con Algoritmo Expectimax</h1>
+        
+        <div class="probability-controls">
+            <h3>Configuración del Fantasma</h3>
+            <div class="slider-container">
+                <label for="aggressiveness">Agresividad:</label>
+                <input type="range" id="aggressiveness" min="0" max="100" value="70" oninput="updateProbabilities()">
+                <span id="aggressivenessValue">70%</span>
+            </div>
+            <div class="slider-container">
+                <label for="randomness">Aleatoriedad:</label>
+                <input type="range" id="randomness" min="0" max="100" value="30" oninput="updateProbabilities()">
+                <span id="randomnessValue">30%</span>
+            </div>
+        </div>
+        
+        <div class="info">
+            <div class="score">Puntos: <span id="score">0</span></div>
+            <div class="thinking" id="thinking"></div>
+            <div id="gameStatus">Juego en progreso</div>
+        </div>
+        
+        <div class="game-board" id="gameBoard"></div>
+        
+        <div class="controls">
+            <button onclick="startGame()">Iniciar Juego</button>
+            <button onclick="pauseGame()" id="pauseBtn">Pausar</button>
+            <button onclick="resetGame()">Reiniciar</button>
+        </div>
+        
+        <div class="algorithm-info">
+            <h3>Algoritmo Expectimax Implementado:</h3>
+            <p><strong>Max (Pacman):</strong> Intenta maximizar su puntuación considerando el comportamiento probabilístico del fantasma.</p>
+            <p><strong>Chance (Fantasma):</strong> Se comporta probabilísticamente:</p>
+            <ul>
+                <li><strong>Agresivo:</strong> Se acerca a Pacman (configurable)</li>
+                <li><strong>Aleatorio:</strong> Se mueve sin estrategia específica (configurable)</li>
+            </ul>
+            <p><strong>Profundidad:</strong> 3 niveles de búsqueda hacia adelante.</p>
+            <p><strong>Evaluación:</strong> Valor esperado basado en las probabilidades de acción del fantasma.</p>
+        </div>
+    </div>
+
+    <script>
+        // Configuración del juego
+        const BOARD_SIZE = 11;
+        const MAX_DEPTH = 3;
+        
+        // Probabilidades del comportamiento del fantasma
+        let ghostBehavior = {
+            aggressive: 0.7,  // Probabilidad de perseguir a Pacman
+            random: 0.3       // Probabilidad de moverse aleatoriamente
+        };
+        
+        // Mapa del juego (1 = pared, 0 = vacío, 2 = punto)
+        const initialMap = [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1],
+            [1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1],
+            [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1],
+            [1, 2, 1, 2, 1, 1, 1, 2, 1, 2, 1],
+            [1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1],
+            [1, 2, 1, 2, 1, 1, 1, 2, 1, 2, 1],
+            [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1],
+            [1, 2, 1, 1, 2, 1, 2, 1, 1, 2, 1],
+            [1, 2, 2, 2, 2, 1, 2, 2, 2, 2, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        ];
+        
+        // Estado del juego
+        let gameState = {
+            map: JSON.parse(JSON.stringify(initialMap)),
+            pacman: { x: 1, y: 1 },
+            ghost: { x: 9, y: 9 },
+            score: 0,
+            gameOver: false,
+            paused: false
+        };
+        
+        let gameInterval;
+        let isThinking = false;
+        
+        // Direcciones posibles
+        const directions = [
+            { dx: 0, dy: -1, name: 'arriba' },
+            { dx: 0, dy: 1, name: 'abajo' },
+            { dx: -1, dy: 0, name: 'izquierda' },
+            { dx: 1, dy: 0, name: 'derecha' }
+        ];
+        
+        function updateProbabilities() {
+            const aggressiveness = document.getElementById('aggressiveness').value / 100;
+            const randomness = document.getElementById('randomness').value / 100;
+            
+            // Normalizar para que sumen 1
+            const total = aggressiveness + randomness;
+            ghostBehavior.aggressive = aggressiveness / total;
+            ghostBehavior.random = randomness / total;
+            
+            document.getElementById('aggressivenessValue').textContent = Math.round(ghostBehavior.aggressive * 100) + '%';
+            document.getElementById('randomnessValue').textContent = Math.round(ghostBehavior.random * 100) + '%';
+        }
+        
+        function initializeGame() {
+            gameState = {
+                map: JSON.parse(JSON.stringify(initialMap)),
+                pacman: { x: 1, y: 1 },
+                ghost: { x: 9, y: 9 },
+                score: 0,
+                gameOver: false,
+                paused: false
+            };
+            updateDisplay();
+        }
+        
+        function updateDisplay() {
+            const board = document.getElementById('gameBoard');
+            board.innerHTML = '';
+            
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    
+                    if (gameState.map[y][x] === 1) {
+                        cell.className += ' wall';
+                    } else if (gameState.pacman.x === x && gameState.pacman.y === y) {
+                        cell.className += ' pacman';
+                        cell.textContent = '🟡';
+                    } else if (gameState.ghost.x === x && gameState.ghost.y === y) {
+                        cell.className += ' ghost';
+                        cell.textContent = '👻';
+                    } else if (gameState.map[y][x] === 2) {
+                        cell.className += ' dot';
+                    } else {
+                        cell.className += ' empty';
+                    }
+                    
+                    board.appendChild(cell);
+                }
+            }
+            
+            document.getElementById('score').textContent = gameState.score;
+            
+            if (gameState.gameOver) {
+                document.getElementById('gameStatus').textContent = 'Juego Terminado!';
+            } else if (gameState.paused) {
+                document.getElementById('gameStatus').textContent = 'Juego Pausado';
+            } else {
+                document.getElementById('gameStatus').textContent = 'Juego en progreso';
+            }
+        }
+        
+        function isValidMove(x, y) {
+            return x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE && gameState.map[y][x] !== 1;
+        }
+        
+        function getValidMoves(x, y) {
+            const moves = [];
+            for (const dir of directions) {
+                const newX = x + dir.dx;
+                const newY = y + dir.dy;
+                if (isValidMove(newX, newY)) {
+                    moves.push({ x: newX, y: newY, direction: dir.name });
+                }
+            }
+            return moves;
+        }
+        
+        function manhattanDistance(pos1, pos2) {
+            return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y);
+        }
+        
+        function evaluateGameState(state) {
+            // Si Pacman y el fantasma están en la misma posición, el juego termina
+            if (state.pacman.x === state.ghost.x && state.pacman.y === state.ghost.y) {
+                return -1000; // Muy malo para Pacman
+            }
+            
+            // Calcular distancia al fantasma
+            const distanceToGhost = manhattanDistance(state.pacman, state.ghost);
+            
+            // Contar puntos restantes
+            let dotsRemaining = 0;
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    if (state.map[y][x] === 2) dotsRemaining++;
+                }
+            }
+            
+            // Evaluación mejorada para Expectimax
+            let evaluation = 0;
+            
+            // Bonus por distancia al fantasma (seguridad)
+            evaluation += distanceToGhost * 15;
+            
+            // Bonus por puntuación actual
+            evaluation += state.score * 25;
+            
+            // Penalización por puntos no recogidos
+            evaluation -= dotsRemaining * 3;
+            
+            // Bonus por estar cerca de puntos
+            let closestDotDistance = Infinity;
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    if (state.map[y][x] === 2) {
+                        const distance = manhattanDistance(state.pacman, { x, y });
+                        closestDotDistance = Math.min(closestDotDistance, distance);
+                    }
+                }
+            }
+            
+            if (closestDotDistance !== Infinity) {
+                evaluation += (10 - closestDotDistance) * 2;
+            }
+            
+            return evaluation;
+        }
+        
+        function cloneGameState(state) {
+            return {
+                map: state.map.map(row => [...row]),
+                pacman: { ...state.pacman },
+                ghost: { ...state.ghost },
+                score: state.score,
+                gameOver: state.gameOver,
+                paused: state.paused
+            };
+        }
+        
+        // Comportamientos del fantasma
+        function getAggressiveMoves(ghostPos, pacmanPos) {
+            const moves = getValidMoves(ghostPos.x, ghostPos.y);
+            if (moves.length === 0) return [];
+            
+            // Ordenar movimientos por distancia a Pacman (más cerca = mejor para el fantasma agresivo)
+            moves.sort((a, b) => {
+                const distA = manhattanDistance(a, pacmanPos);
+                const distB = manhattanDistance(b, pacmanPos);
+                return distA - distB;
+            });
+            
+            return moves;
+        }
+        
+        function getRandomMoves(ghostPos) {
+            return getValidMoves(ghostPos.x, ghostPos.y);
+        }
+        
+        // Algoritmo Expectimax
+        function expectimax(state, depth, isMaximizingPlayer) {
+            // Caso base: profundidad máxima o juego terminado
+            if (depth === 0 || (state.pacman.x === state.ghost.x && state.pacman.y === state.ghost.y)) {
+                return evaluateGameState(state);
+            }
+            
+            if (isMaximizingPlayer) {
+                // Turno de Pacman (Max)
+                let maxEval = -Infinity;
+                const pacmanMoves = getValidMoves(state.pacman.x, state.pacman.y);
+                
+                for (const move of pacmanMoves) {
+                    const newState = cloneGameState(state);
+                    newState.pacman = { x: move.x, y: move.y };
+                    
+                    // Si Pacman recoge un punto
+                    if (newState.map[move.y][move.x] === 2) {
+                        newState.map[move.y][move.x] = 0;
+                        newState.score += 10;
+                    }
+                    
+                    const eval = expectimax(newState, depth - 1, false);
+                    maxEval = Math.max(maxEval, eval);
+                }
+                
+                return maxEval;
+            } else {
+                // Turno del Fantasma (Chance/Expectation)
+                let expectedValue = 0;
+                
+                // Comportamiento agresivo
+                const aggressiveMoves = getAggressiveMoves(state.ghost, state.pacman);
+                if (aggressiveMoves.length > 0) {
+                    for (const move of aggressiveMoves) {
+                        const newState = cloneGameState(state);
+                        newState.ghost = { x: move.x, y: move.y };
+                        
+                        const eval = expectimax(newState, depth - 1, true);
+                        // Probabilidad dividida entre todos los movimientos agresivos
+                        expectedValue += (ghostBehavior.aggressive / aggressiveMoves.length) * eval;
+                    }
+                }
+                
+                // Comportamiento aleatorio
+                const randomMoves = getRandomMoves(state.ghost);
+                if (randomMoves.length > 0) {
+                    for (const move of randomMoves) {
+                        const newState = cloneGameState(state);
+                        newState.ghost = { x: move.x, y: move.y };
+                        
+                        const eval = expectimax(newState, depth - 1, true);
+                        // Probabilidad dividida entre todos los movimientos posibles
+                        expectedValue += (ghostBehavior.random / randomMoves.length) * eval;
+                    }
+                }
+                
+                return expectedValue;
+            }
+        }
+        
+        function getBestPacmanMove(state) {
+            let bestMove = null;
+            let bestValue = -Infinity;
+            
+            const moves = getValidMoves(state.pacman.x, state.pacman.y);
+            
+            for (const move of moves) {
+                const newState = cloneGameState(state);
+                newState.pacman = { x: move.x, y: move.y };
+                
+                if (newState.map[move.y][move.x] === 2) {
+                    newState.map[move.y][move.x] = 0;
+                    newState.score += 10;
+                }
+                
+                const value = expectimax(newState, MAX_DEPTH - 1, false);
+                
+                if (value > bestValue) {
+                    bestValue = value;
+                    bestMove = move;
+                }
+            }
+            
+            return bestMove;
+        }
+        
+        function getGhostMove(state) {
+            const rand = Math.random();
+            
+            if (rand < ghostBehavior.aggressive) {
+                // Comportamiento agresivo: ir hacia Pacman
+                const aggressiveMoves = getAggressiveMoves(state.ghost, state.pacman);
+                if (aggressiveMoves.length > 0) {
+                    return aggressiveMoves[0]; // El mejor movimiento agresivo
+                }
+            }
+            
+            // Comportamiento aleatorio: movimiento al azar
+            const randomMoves = getRandomMoves(state.ghost);
+            if (randomMoves.length > 0) {
+                return randomMoves[Math.floor(Math.random() * randomMoves.length)];
+            }
+            
+            return null;
+        }
+        
+        async function gameLoop() {
+            if (gameState.gameOver || gameState.paused) return;
+            
+            isThinking = true;
+            document.getElementById('thinking').textContent = 'Calculando movimiento óptimo...';
+            
+            // Pequeña pausa para mostrar el mensaje de "pensando"
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Movimiento de Pacman usando Expectimax
+            const pacmanMove = getBestPacmanMove(gameState);
+            if (pacmanMove) {
+                gameState.pacman = { x: pacmanMove.x, y: pacmanMove.y };
+                
+                // Recoger punto
+                if (gameState.map[pacmanMove.y][pacmanMove.x] === 2) {
+                    gameState.map[pacmanMove.y][pacmanMove.x] = 0;
+                    gameState.score += 10;
+                }
+            }
+            
+            // Verificar si el juego terminó
+            if (gameState.pacman.x === gameState.ghost.x && gameState.pacman.y === gameState.ghost.y) {
+                gameState.gameOver = true;
+                document.getElementById('thinking').textContent = 'El fantasma atrapó a Pacman!';
+                updateDisplay();
+                return;
+            }
+            
+            // Movimiento del Fantasma usando comportamiento probabilístico
+            const ghostMove = getGhostMove(gameState);
+            if (ghostMove) {
+                gameState.ghost = { x: ghostMove.x, y: ghostMove.y };
+            }
+            
+            // Verificar si el juego terminó después del movimiento del fantasma
+            if (gameState.pacman.x === gameState.ghost.x && gameState.pacman.y === gameState.ghost.y) {
+                gameState.gameOver = true;
+                document.getElementById('thinking').textContent = 'El fantasma atrapó a Pacman!';
+            } else {
+                // Verificar si quedan puntos
+                let dotsRemaining = 0;
+                for (let y = 0; y < BOARD_SIZE; y++) {
+                    for (let x = 0; x < BOARD_SIZE; x++) {
+                        if (gameState.map[y][x] === 2) dotsRemaining++;
+                    }
+                }
+                
+                if (dotsRemaining === 0) {
+                    gameState.gameOver = true;
+                    document.getElementById('thinking').textContent = 'Pacman ganó! Todos los puntos recogidos!';
+                } else {
+                    document.getElementById('thinking').textContent = '';
+                }
+            }
+            
+            isThinking = false;
+            updateDisplay();
+        }
+        
+        function startGame() {
+            if (gameInterval) clearInterval(gameInterval);
+            gameState.paused = false;
+            gameInterval = setInterval(gameLoop, 1200); // 1.2 segundos entre movimientos (un poco más lento para ver el proceso)
+            document.getElementById('pauseBtn').disabled = false;
+        }
+        
+        function pauseGame() {
+            gameState.paused = !gameState.paused;
+            const btn = document.getElementById('pauseBtn');
+            if (gameState.paused) {
+                clearInterval(gameInterval);
+                btn.textContent = 'Reanudar';
+            } else {
+                startGame();
+                btn.textContent = 'Pausar';
+            }
+        }
+        
+        function resetGame() {
+            if (gameInterval) clearInterval(gameInterval);
+            initializeGame();
+            document.getElementById('thinking').textContent = '';
+            document.getElementById('pauseBtn').textContent = 'Pausar';
+            document.getElementById('pauseBtn').disabled = true;
+        }
+        
+        // Inicializar el juego
+        initializeGame();
+        updateProbabilities();
+    </script>
+</body>
+</html>

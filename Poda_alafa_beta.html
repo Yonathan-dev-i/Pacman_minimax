@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pacman con Poda Alfa-Beta</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #000;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+        
+        .game-board {
+            display: grid;
+            grid-template-columns: repeat(7, 40px);
+            grid-template-rows: repeat(7, 40px);
+            gap: 1px;
+            background: #333;
+            padding: 10px;
+            border-radius: 10px;
+        }
+        
+        .cell {
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: bold;
+            border-radius: 3px;
+        }
+        
+        .wall {
+            background: #0066cc;
+        }
+        
+        .empty {
+            background: #000;
+        }
+        
+        .dot {
+            background: #000;
+            position: relative;
+        }
+        
+        .dot::after {
+            content: '•';
+            color: #ffff00;
+            font-size: 12px;
+        }
+        
+        .pacman {
+            background: #000;
+            color: #ffff00;
+        }
+        
+        .ghost {
+            background: #000;
+            color: #ff6b6b;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #0052a3;
+        }
+        
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        .info {
+            text-align: center;
+            margin-top: 20px;
+        }
+        
+        .score {
+            font-size: 24px;
+            margin: 10px 0;
+        }
+        
+        .thinking {
+            color: #ffff00;
+            margin: 10px 0;
+        }
+        
+        .stats {
+            color: #88ff88;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+        
+        .algorithm-info {
+            background: #222;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            max-width: 600px;
+            text-align: left;
+        }
+        
+        .comparison {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        
+        .stat-box {
+            background: #333;
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>Pacman con Poda Alfa-Beta</h1>
+        
+        <div class="info">
+            <div class="score">Puntos: <span id="score">0</span></div>
+            <div class="thinking" id="thinking"></div>
+            <div id="gameStatus">Juego en progreso</div>
+            <div class="stats" id="stats">Nodos evaluados: 0 | Podas realizadas: 0</div>
+        </div>
+        
+        <div class="game-board" id="gameBoard"></div>
+        
+        <div class="controls">
+            <button onclick="startGame()">Iniciar Juego</button>
+            <button onclick="pauseGame()" id="pauseBtn">Pausar</button>
+            <button onclick="resetGame()">Reiniciar</button>
+        </div>
+        
+        <div class="comparison">
+            <div class="stat-box">
+                <div><strong>Esta jugada</strong></div>
+                <div>Nodos: <span id="currentNodes">0</span></div>
+                <div>Podas: <span id="currentPrunes">0</span></div>
+            </div>
+            <div class="stat-box">
+                <div><strong>Total del juego</strong></div>
+                <div>Nodos: <span id="totalNodes">0</span></div>
+                <div>Podas: <span id="totalPrunes">0</span></div>
+            </div>
+        </div>
+        
+        <div class="algorithm-info">
+            <h3>Algoritmo Poda Alfa-Beta Implementado:</h3>
+            <p><strong>Optimización:</strong> La poda alfa-beta elimina ramas del árbol de búsqueda que no pueden mejorar el resultado final.</p>
+            <p><strong>Alpha (α):</strong> Mejor valor que el jugador maximizador puede garantizar hasta el momento.</p>
+            <p><strong>Beta (β):</strong> Mejor valor que el jugador minimizador puede garantizar hasta el momento.</p>
+            <p><strong>Poda:</strong> Cuando α ≥ β, se pueden ignorar las ramas restantes.</p>
+            <p><strong>Ventaja:</strong> Mismos resultados que minimax pero evaluando menos nodos.</p>
+            <p><strong>Profundidad:</strong> 4 niveles (aumentada gracias a la eficiencia).</p>
+        </div>
+    </div>
+
+    <script>
+        // Configuración del juego
+        const BOARD_SIZE = 7;
+        const MAX_DEPTH = 4; // Aumentamos la profundidad gracias a la eficiencia de alfa-beta
+        
+        // Estadísticas para comparar eficiencia
+        let totalNodesEvaluated = 0;
+        let totalPrunesMade = 0;
+        
+        // Mapa del juego (1 = pared, 0 = vacío, 2 = punto)
+        const initialMap = [
+            [1, 1, 1, 1, 1, 1, 1],
+            [1, 2, 2, 2, 2, 2, 1],
+            [1, 2, 1, 2, 1, 2, 1],
+            [1, 2, 2, 2, 2, 2, 1],
+            [1, 2, 1, 2, 1, 2, 1],
+            [1, 2, 2, 2, 2, 2, 1],
+            [1, 1, 1, 1, 1, 1, 1]
+        ];
+        
+        // Estado del juego
+        let gameState = {
+            map: JSON.parse(JSON.stringify(initialMap)),
+            pacman: { x: 1, y: 1 },
+            ghost: { x: 5, y: 5 },
+            score: 0,
+            gameOver: false,
+            paused: false
+        };
+        
+        let gameInterval;
+        let isThinking = false;
+        
+        // Direcciones posibles
+        const directions = [
+            { dx: 0, dy: -1, name: 'arriba' },
+            { dx: 0, dy: 1, name: 'abajo' },
+            { dx: -1, dy: 0, name: 'izquierda' },
+            { dx: 1, dy: 0, name: 'derecha' }
+        ];
+        
+        function initializeGame() {
+            gameState = {
+                map: JSON.parse(JSON.stringify(initialMap)),
+                pacman: { x: 1, y: 1 },
+                ghost: { x: 5, y: 5 },
+                score: 0,
+                gameOver: false,
+                paused: false
+            };
+            totalNodesEvaluated = 0;
+            totalPrunesMade = 0;
+            updateDisplay();
+            updateStats();
+        }
+        
+        function updateDisplay() {
+            const board = document.getElementById('gameBoard');
+            board.innerHTML = '';
+            
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    
+                    if (gameState.map[y][x] === 1) {
+                        cell.className += ' wall';
+                    } else if (gameState.pacman.x === x && gameState.pacman.y === y) {
+                        cell.className += ' pacman';
+                        cell.textContent = '🟡';
+                    } else if (gameState.ghost.x === x && gameState.ghost.y === y) {
+                        cell.className += ' ghost';
+                        cell.textContent = '👻';
+                    } else if (gameState.map[y][x] === 2) {
+                        cell.className += ' dot';
+                    } else {
+                        cell.className += ' empty';
+                    }
+                    
+                    board.appendChild(cell);
+                }
+            }
+            
+            document.getElementById('score').textContent = gameState.score;
+            
+            if (gameState.gameOver) {
+                document.getElementById('gameStatus').textContent = 'Juego Terminado!';
+            } else if (gameState.paused) {
+                document.getElementById('gameStatus').textContent = 'Juego Pausado';
+            } else {
+                document.getElementById('gameStatus').textContent = 'Juego en progreso';
+            }
+        }
+        
+        function updateStats() {
+            document.getElementById('totalNodes').textContent = totalNodesEvaluated;
+            document.getElementById('totalPrunes').textContent = totalPrunesMade;
+        }
+        
+        function isValidMove(x, y) {
+            return x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE && gameState.map[y][x] !== 1;
+        }
+        
+        function getValidMoves(x, y) {
+            const moves = [];
+            for (const dir of directions) {
+                const newX = x + dir.dx;
+                const newY = y + dir.dy;
+                if (isValidMove(newX, newY)) {
+                    moves.push({ x: newX, y: newY, direction: dir.name });
+                }
+            }
+            return moves;
+        }
+        
+        function manhattanDistance(pos1, pos2) {
+            return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y);
+        }
+        
+        function evaluateGameState(state) {
+            // Si Pacman y el fantasma están en la misma posición, el juego termina
+            if (state.pacman.x === state.ghost.x && state.pacman.y === state.ghost.y) {
+                return -1000; // Muy malo para Pacman
+            }
+            
+            // Calcular distancia al fantasma
+            const distanceToGhost = manhattanDistance(state.pacman, state.ghost);
+            
+            // Contar puntos restantes
+            let dotsRemaining = 0;
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    if (state.map[y][x] === 2) dotsRemaining++;
+                }
+            }
+            
+            // Evaluación mejorada con más factores
+            let evaluation = 0;
+            
+            // Distancia al fantasma (más distancia = mejor)
+            evaluation += distanceToGhost * 15;
+            
+            // Puntuación actual
+            evaluation += state.score * 25;
+            
+            // Penalizar puntos no recogidos
+            evaluation -= dotsRemaining * 3;
+            
+            // Bonificación por estar cerca de puntos
+            let nearestDotDistance = Infinity;
+            for (let y = 0; y < BOARD_SIZE; y++) {
+                for (let x = 0; x < BOARD_SIZE; x++) {
+                    if (state.map[y][x] === 2) {
+                        const distance = manhattanDistance(state.pacman, { x, y });
+                        nearestDotDistance = Math.min(nearestDotDistance, distance);
+                    }
+                }
+            }
+            
+            if (nearestDotDistance !== Infinity) {
+                evaluation -= nearestDotDistance * 2; // Bonificar estar cerca de puntos
+            }
+            
+            return evaluation;
+        }
+        
+        function cloneGameState(state) {
+            return {
+                map: state.map.map(row => [...row]),
+                pacman: { ...state.pacman },
+                ghost: { ...state.ghost },
+                score: state.score,
+                gameOver: state.gameOver,
+                paused: state.paused
+            };
+        }
+        
+        // Algoritmo Poda Alfa-Beta
+        function alphaBeta(state, depth, alpha, beta, isMaximizingPlayer, stats) {
+            stats.nodesEvaluated++;
+            
+            // Caso base: profundidad máxima o juego terminado
+            if (depth === 0 || (state.pacman.x === state.ghost.x && state.pacman.y === state.ghost.y)) {
+                return evaluateGameState(state);
+            }
+            
+            if (isMaximizingPlayer) {
+                // Turno de Pacman (Max)
+                let maxEval = -Infinity;
+                const pacmanMoves = getValidMoves(state.pacman.x, state.pacman.y);
+                
+                for (const move of pacmanMoves) {
+                    const newState = cloneGameState(state);
+                    newState.pacman = { x: move.x, y: move.y };
+                    
+                    // Si Pacman recoge un punto
+                    if (newState.map[move.y][move.x] === 2) {
+                        newState.map[move.y][move.x] = 0;
+                        newState.score += 10;
+                    }
+                    
+                    const eval = alphaBeta(newState, depth - 1, alpha, beta, false, stats);
+                    maxEval = Math.max(maxEval, eval);
+                    alpha = Math.max(alpha, eval);
+                    
+                    // Poda Beta
+                    if (beta <= alpha) {
+                        stats.prunesMade++;
+                        break; // β cutoff (poda)
+                    }
+                }
+                
+                return maxEval;
+            } else {
+                // Turno del Fantasma (Min)
+                let minEval = Infinity;
+                const ghostMoves = getValidMoves(state.ghost.x, state.ghost.y);
+                
+                for (const move of ghostMoves) {
+                    const newState = cloneGameState(state);
+                    newState.ghost = { x: move.x, y: move.y };
+                    
+                    const eval = alphaBeta(newState, depth - 1, alpha, beta, true, stats);
+                    minEval = Math.min(minEval, eval);
+                    beta = Math.min(beta, eval);
+                    
+                    // Poda Alpha
+                    if (beta <= alpha) {
+                        stats.prunesMade++;
+                        break; // α cutoff (poda)
+                    }
+                }
+                
+                return minEval;
+            }
+        }
+        
+        function getBestMoveAlphaBeta(state, isMaximizingPlayer) {
+            let bestMove = null;
+            let bestValue = isMaximizingPlayer ? -Infinity : Infinity;
+            let alpha = -Infinity;
+            let beta = Infinity;
+            
+            // Estadísticas para esta jugada
+            const moveStats = { nodesEvaluated: 0, prunesMade: 0 };
+            
+            if (isMaximizingPlayer) {
+                // Encontrar mejor movimiento para Pacman
+                const moves = getValidMoves(state.pacman.x, state.pacman.y);
+                
+                for (const move of moves) {
+                    const newState = cloneGameState(state);
+                    newState.pacman = { x: move.x, y: move.y };
+                    
+                    if (newState.map[move.y][move.x] === 2) {
+                        newState.map[move.y][move.x] = 0;
+                        newState.score += 10;
+                    }
+                    
+                    const value = alphaBeta(newState, MAX_DEPTH - 1, alpha, beta, false, moveStats);
+                    
+                    if (value > bestValue) {
+                        bestValue = value;
+                        bestMove = move;
+                    }
+                    
+                    alpha = Math.max(alpha, value);
+                    if (beta <= alpha) {
+                        moveStats.prunesMade++;
+                        break;
+                    }
+                }
+            } else {
+                // Encontrar mejor movimiento para el Fantasma
+                const moves = getValidMoves(state.ghost.x, state.ghost.y);
+                
+                for (const move of moves) {
+                    const newState = cloneGameState(state);
+                    newState.ghost = { x: move.x, y: move.y };
+                    
+                    const value = alphaBeta(newState, MAX_DEPTH - 1, alpha, beta, true, moveStats);
+                    
+                    if (value < bestValue) {
+                        bestValue = value;
+                        bestMove = move;
+                    }
+                    
+                    beta = Math.min(beta, value);
+                    if (beta <= alpha) {
+                        moveStats.prunesMade++;
+                        break;
+                    }
+                }
+            }
+            
+            // Actualizar estadísticas
+            totalNodesEvaluated += moveStats.nodesEvaluated;
+            totalPrunesMade += moveStats.prunesMade;
+            
+            // Mostrar estadísticas de esta jugada
+            document.getElementById('currentNodes').textContent = moveStats.nodesEvaluated;
+            document.getElementById('currentPrunes').textContent = moveStats.prunesMade;
+            
+            return bestMove;
+        }
+        
+        async function gameLoop() {
+            if (gameState.gameOver || gameState.paused) return;
+            
+            isThinking = true;
+            document.getElementById('thinking').textContent = 'Calculando con poda alfa-beta...';
+            
+            // Pequeña pausa para mostrar el mensaje de "pensando"
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Movimiento de Pacman (Max)
+            const pacmanMove = getBestMoveAlphaBeta(gameState, true);
+            if (pacmanMove) {
+                gameState.pacman = { x: pacmanMove.x, y: pacmanMove.y };
+                
+                // Recoger punto
+                if (gameState.map[pacmanMove.y][pacmanMove.x] === 2) {
+                    gameState.map[pacmanMove.y][pacmanMove.x] = 0;
+                    gameState.score += 10;
+                }
+            }
+            
+            // Verificar si el juego terminó
+            if (gameState.pacman.x === gameState.ghost.x && gameState.pacman.y === gameState.ghost.y) {
+                gameState.gameOver = true;
+                document.getElementById('thinking').textContent = 'El fantasma atrapó a Pacman!';
+                updateDisplay();
+                updateStats();
+                return;
+            }
+            
+            // Movimiento del Fantasma (Min)
+            const ghostMove = getBestMoveAlphaBeta(gameState, false);
+            if (ghostMove) {
+                gameState.ghost = { x: ghostMove.x, y: ghostMove.y };
+            }
+            
+            // Verificar si el juego terminó después del movimiento del fantasma
+            if (gameState.pacman.x === gameState.ghost.x && gameState.pacman.y === gameState.ghost.y) {
+                gameState.gameOver = true;
+                document.getElementById('thinking').textContent = 'El fantasma atrapó a Pacman!';
+            } else {
+                // Verificar si quedan puntos
+                let dotsRemaining = 0;
+                for (let y = 0; y < BOARD_SIZE; y++) {
+                    for (let x = 0; x < BOARD_SIZE; x++) {
+                        if (gameState.map[y][x] === 2) dotsRemaining++;
+                    }
+                }
+                
+                if (dotsRemaining === 0) {
+                    gameState.gameOver = true;
+                    document.getElementById('thinking').textContent = 'Pacman ganó! Todos los puntos recogidos!';
+                } else {
+                    document.getElementById('thinking').textContent = '';
+                }
+            }
+            
+            isThinking = false;
+            updateDisplay();
+            updateStats();
+        }
+        
+        function startGame() {
+            if (gameInterval) clearInterval(gameInterval);
+            gameState.paused = false;
+            gameInterval = setInterval(gameLoop, 1200); // Ligeramente más lento para apreciar las estadísticas
+            document.getElementById('pauseBtn').disabled = false;
+        }
+        
+        function pauseGame() {
+            gameState.paused = !gameState.paused;
+            const btn = document.getElementById('pauseBtn');
+            if (gameState.paused) {
+                clearInterval(gameInterval);
+                btn.textContent = 'Reanudar';
+            } else {
+                startGame();
+                btn.textContent = 'Pausar';
+            }
+        }
+        
+        function resetGame() {
+            if (gameInterval) clearInterval(gameInterval);
+            initializeGame();
+            document.getElementById('thinking').textContent = '';
+            document.getElementById('pauseBtn').textContent = 'Pausar';
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('currentNodes').textContent = '0';
+            document.getElementById('currentPrunes').textContent = '0';
+        }
+        
+        // Inicializar el juego
+        initializeGame();
+    </script>
+</body>
+</html>
